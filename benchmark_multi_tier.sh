@@ -199,6 +199,12 @@ EOF
         send_file="$patched_file"
     fi
 
+    # 按 worker_id + request_id 轮询选择 Kong 节点
+    local ep_idx=$(( (worker_id - 1 + request_id) % KONG_ENDPOINT_COUNT ))
+    get_endpoint "$ep_idx"
+    local cur_endpoint="${EP_URL}${ENDPOINT_PATH}"
+    local cur_token="${EP_TOKEN}"
+
     local http_code
     local time_total
     local curl_output
@@ -206,9 +212,9 @@ EOF
 
     curl_output=$(curl -s -w "%{http_code} %{time_total}" \
         -o "$resp_file" \
-        -X POST "${ENDPOINT}" \
+        -X POST "${cur_endpoint}" \
         -H "Content-Type: application/json" \
-        -H "Authorization: Bearer ${AUTH_TOKEN}" \
+        -H "Authorization: Bearer ${cur_token}" \
         -d @"$send_file" \
         --connect-timeout 30 \
         --max-time 600 \
@@ -688,7 +694,11 @@ main() {
     log ""
 
     log "【总体配置】"
-    log "  目标地址: ${ENDPOINT}"
+    log "  Kong 节点数: ${KONG_ENDPOINT_COUNT}"
+    for i in $(seq 0 $((KONG_ENDPOINT_COUNT - 1))); do
+        get_endpoint "$i"
+        log "    节点$((i+1)): ${EP_URL}"
+    done
     log "  测试模型: ${MODEL}"
     log "  并发数:   ${CONCURRENCY}"
     log "  总时长:   ${TOTAL_DURATION} 秒 ($(echo "scale=1; $TOTAL_DURATION / 60" | bc) 分钟)"
@@ -697,13 +707,26 @@ main() {
     log "  结果目录: ${WORK_DIR}"
     log ""
 
-    # 测试连接
-    log "测试连接..."
-    if ! curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" "${ENDPOINT}" > /dev/null 2>&1; then
-        log "无法连接到 Kong 网关: ${KONG_URL}"
+    # 测试所有节点连接
+    log "测试连接 (${KONG_ENDPOINT_COUNT} 个节点)..."
+    local conn_fail=0
+    for i in $(seq 0 $((KONG_ENDPOINT_COUNT - 1))); do
+        get_endpoint "$i"
+        local test_url="${EP_URL}${ENDPOINT_PATH}"
+        if curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" "${test_url}" > /dev/null 2>&1; then
+            log "  ✓ 节点$((i+1)) ${EP_URL} 连接成功"
+        else
+            log "  ✗ 节点$((i+1)) ${EP_URL} 连接失败"
+            ((conn_fail++))
+        fi
+    done
+    if [ "$conn_fail" -eq "$KONG_ENDPOINT_COUNT" ]; then
+        log "所有 Kong 节点均无法连接，退出"
         exit 1
+    elif [ "$conn_fail" -gt 0 ]; then
+        log "⚠ ${conn_fail} 个节点连接失败，继续使用可用节点"
     fi
-    log "✓ 连接成功"
+    log "✓ 连接测试完成"
 
     # 初始化汇总文件
     > "${WORK_DIR}/summary.csv"
