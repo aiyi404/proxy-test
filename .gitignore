@@ -1,0 +1,6 @@
+benchmark_results/
+cluster_results/
+node-v*/
+*.log
+*.pid
+/tmp/
