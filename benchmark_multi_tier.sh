@@ -13,7 +13,8 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/kong.conf"
 
-ENDPOINT="${KONG_URL}/llm/v1/chat/completions"
+ENDPOINT_PATH="/llm/v1/chat/completions"
+ENDPOINT="${KONG_URL}${ENDPOINT_PATH}"
 
 # 压测参数
 CONCURRENCY="${CONCURRENCY:-200}"
